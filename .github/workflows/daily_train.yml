@@ -1,0 +1,23 @@
+name: Daily Topological Training
+
+on:
+  schedule:
+    - cron: '0 01 * * *'   # 20:00 UTC daily (adjust to your market close)
+  workflow_dispatch:
+
+jobs:
+  train:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repo
+        uses: actions/checkout@v4
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.10'
+      - name: Install dependencies
+        run: pip install -r requirements.txt
+      - name: Run training
+        env:
+          HF_TOKEN: ${{ secrets.HF_TOKEN }}
+        run: python train.py
