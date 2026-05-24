@@ -12,7 +12,12 @@ st.markdown('<p style="text-align: center;">Hodge decomposition of ETF return fl
 st.sidebar.markdown("## 🧩 Topological Signals")
 st.sidebar.markdown(f"**Run Date:** `{st.session_state.get('run_date', 'Not loaded')}`")
 st.sidebar.markdown(f"**Next Trading Day:** `{next_trading_day()}`")
-st.sidebar.markdown(f"**Threshold mult:** {config.THRESHOLD_MULT} | **Vol window:** {config.VOL_WINDOW}")
+
+# Safe fallback for optional config values
+threshold_mult = getattr(config, 'THRESHOLD_MULT', 'N/A')
+vol_window = getattr(config, 'VOL_WINDOW', 'N/A')
+st.sidebar.markdown(f"**Threshold mult:** {threshold_mult} | **Vol window:** {vol_window}")
+
 st.sidebar.markdown(f"**Windows evaluated:** {', '.join(map(str, config.WINDOWS))} days")
 st.sidebar.markdown("**Method:** Graph Helmholtzian (Lim 2020)")
 
@@ -71,7 +76,6 @@ with st.expander("📖 Interpretation", expanded=True):
 
 for universe_name, uni_results in data["universes"].items():
     st.markdown(f'<h2 style="font-size: 1.5rem;">{universe_name.replace("_", " ").title()}</h2>', unsafe_allow_html=True)
-    # Create a dropdown to select window
     windows_avail = [res["window"] for res in uni_results]
     sel_window = st.selectbox(f"Select window for {universe_name}", windows_avail, key=universe_name)
     res = next(r for r in uni_results if r["window"] == sel_window)
@@ -85,7 +89,6 @@ for universe_name, uni_results in data["universes"].items():
                 Harmonic score: {etf['harmonic_score']:.6f}
             </div>
             """, unsafe_allow_html=True)
-    # Full table
     with st.expander(f"Full ranking for {universe_name} (window {sel_window}d)"):
         all_scores = res["all_scores"]
         df_full = pd.DataFrame(list(all_scores.items()), columns=["Ticker", "Harmonic Score"])
