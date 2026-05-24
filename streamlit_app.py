@@ -6,8 +6,34 @@ import config
 from us_calendar import next_trading_day
 
 st.set_page_config(page_title="Topological Signal Processing", layout="wide")
+
+# Custom CSS for larger hero cards
+st.markdown("""
+<style>
+.hero-card {
+    background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+    padding: 1.5rem;
+    border-radius: 1rem;
+    margin: 0.5rem;
+    text-align: center;
+    color: white;
+    box-shadow: 0 10px 20px rgba(0,0,0,0.2);
+}
+.hero-card h3 {
+    font-size: 2rem;
+    margin: 0;
+    font-weight: bold;
+}
+.hero-card p {
+    font-size: 1.2rem;
+    margin: 0.5rem 0 0;
+    opacity: 0.9;
+}
+</style>
+""", unsafe_allow_html=True)
+
 st.markdown('<h1 style="text-align: center;">🌀 Topological Signal Processing</h1>', unsafe_allow_html=True)
-st.markdown('<p style="text-align: center;">Hodge decomposition of ETF return flows | Gradient + Curl + Harmonic | Harmonic = arbitrage‑free persistent signal</p>', unsafe_allow_html=True)
+st.markdown('<p style="text-align: center;">Hodge decomposition of ETF return flows | Harmonic = arbitrage‑free persistent signal</p>', unsafe_allow_html=True)
 
 st.sidebar.markdown("## 🧩 Topological Signals")
 st.sidebar.markdown(f"**Run Date:** `{st.session_state.get('run_date', 'Not loaded')}`")
@@ -57,36 +83,40 @@ if "error" in data:
 st.session_state['run_date'] = data['run_date']
 
 st.header("🚀 Top ETFs by Harmonic Signal Strength")
-with st.expander("📖 Interpretation", expanded=True):
+with st.expander("📖 Interpretation", expanded=False):
     st.markdown("""
-    - **Hodge decomposition** splits edge flows (differences in ETF returns) into three orthogonal components:
+    - **Hodge decomposition** splits edge flows (differences in ETF cumulative returns) into three orthogonal components:
       - **Gradient**: flow driven by a global potential (like a market index).
       - **Curl**: rotational/cyclic flow patterns.
       - **Harmonic**: flow that is both divergence‑free and curl‑free → persistent, arbitrage‑free circulation.
-    - The **harmonic component** cannot be reduced to a single score or pure cycles; it represents multi‑asset relative value.
-    - The displayed score is the **divergence of the harmonic flow** at each ETF node. High absolute values indicate strong harmonic involvement.
-    - For each universe and window, we show the **3 ETFs with largest absolute harmonic divergence**.
+    - The **harmonic component** is a novel signal not captured by standard momentum or mean‑reversion.
+    - The displayed score is the **normalized divergence of the harmonic flow** (min‑max scaled per universe per window).
+    - For each universe, we automatically select the rolling window that yields the **strongest absolute harmonic signal**.
     """)
 
-for universe_name, uni_results in data["universes"].items():
-    st.markdown(f'<h2 style="font-size: 1.5rem;">{universe_name.replace("_", " ").title()}</h2>', unsafe_allow_html=True)
-    windows_avail = [res["window"] for res in uni_results]
-    sel_window = st.selectbox(f"Select window for {universe_name}", windows_avail, key=universe_name)
-    res = next(r for r in uni_results if r["window"] == sel_window)
-    top3 = res["top_etfs"]
+for universe_name, uni_data in data["universes"].items():
+    if not uni_data:
+        continue
+    best_win = uni_data["best_window"]
+    best_data = uni_data["best_window_data"]
+    top3 = best_data["top_etfs"]
+    st.markdown(f'<h2 style="font-size: 1.8rem; margin-top: 1rem;">{universe_name.replace("_", " ").title()} <span style="font-size: 0.9rem; background: #e0e0e0; padding: 0.2rem 0.8rem; border-radius: 20px;">best window {best_win}d</span></h2>', unsafe_allow_html=True)
     cols = st.columns(3)
     for idx, etf in enumerate(top3):
-        with cols[idx % 3]:
+        with cols[idx]:
             st.markdown(f"""
-            <div style="background: #f0f2f6; padding: 12px; border-radius: 8px; margin: 5px; text-align: center;">
-                <strong>{etf['ticker']}</strong><br>
-                Harmonic score: {etf['harmonic_score']:.6f}
+            <div class="hero-card">
+                <h3>{etf['ticker']}</h3>
+                <p>Harmonic signal: {etf['harmonic_score_norm']:.3f}</p>
+                <p style="font-size:0.9rem;">raw: {etf['raw_score']:.2e}</p>
             </div>
             """, unsafe_allow_html=True)
-    with st.expander(f"Full ranking for {universe_name} (window {sel_window}d)"):
-        all_scores = res["all_scores"]
-        df_full = pd.DataFrame(list(all_scores.items()), columns=["Ticker", "Harmonic Score"])
-        df_full = df_full.sort_values("Harmonic Score", ascending=False)
+    with st.expander(f"Full ranking for {universe_name}"):
+        norm_scores = best_data["all_scores_norm"]
+        raw_scores = best_data["all_scores_raw"]
+        df_full = pd.DataFrame(list(norm_scores.items()), columns=["Ticker", "Normalized Score"])
+        df_full["Raw Score"] = df_full["Ticker"].apply(lambda t: raw_scores[t])
+        df_full = df_full.sort_values("Normalized Score", ascending=False)
         st.dataframe(df_full, use_container_width=True)
 
 st.sidebar.markdown("---")
