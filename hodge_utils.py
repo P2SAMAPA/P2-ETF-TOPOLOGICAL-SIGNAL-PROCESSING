@@ -6,17 +6,15 @@ from scipy.sparse.linalg import lsqr
 
 def build_graph_from_returns(returns_df, top_edge_fraction=0.2):
     """
-    Build undirected graph with edge weights = 1 - correlation.
+    Build undirected graph with edge weights = 1 - |correlation|.
     Returns:
         G: networkx Graph
-        edge_list: list of (i, j, weight)
-        node_list: list of tickers in order
+        edge_list: list of (i, j, weight) with integer indices
+        nodes: list of ticker symbols in the order used for indices
     """
     corr = returns_df.corr().fillna(0)
     np.fill_diagonal(corr.values, 0)
-    # distance
-    dist = 1 - abs(corr)   # or 1 - correlation? Use absolute for symmetry
-    # keep top fraction of edges (smallest distance -> strongest correlation)
+    dist = 1 - np.abs(corr)   # distance = 1 - |correlation|
     n_edges = len(dist) * (len(dist)-1) // 2
     keep = int(n_edges * top_edge_fraction)
     triu = np.triu_indices_from(dist, k=1)
@@ -38,15 +36,18 @@ def build_graph_from_returns(returns_df, top_edge_fraction=0.2):
                 edge_list.append((i, j, d))
     return G, edge_list, nodes
 
-def incidence_matrix(G, node_list, edge_list):
-    """Build sparse incidence matrix B1 (nodes x edges)."""
+def incidence_matrix(node_list, edge_list):
+    """
+    Build sparse incidence matrix B (nodes x edges).
+    Orientation: from node i to node j (i -> j)
+    """
     n_nodes = len(node_list)
     n_edges = len(edge_list)
     row = []
     col = []
     data = []
-    for e_idx, (i, j, w) in enumerate(edge_list):
-        # orientation: i -> j
+    for e_idx, (i, j, _) in enumerate(edge_list):
+        # i -> j: -1 at i, +1 at j
         row.append(i)
         col.append(e_idx)
         data.append(-1.0)
@@ -58,11 +59,11 @@ def incidence_matrix(G, node_list, edge_list):
 
 def compute_edge_flow(returns_df, edge_list):
     """
-    Flow on edge (i,j) = return_i - return_j (on the last day of the window).
-    Returns a vector f of length n_edges.
+    Edge flow = return_i - return_j for the last day in the window.
+    Returns 1D numpy array of length len(edge_list).
     """
-    last_ret = returns_df.iloc[-1]  # last day return
-    f = np.zeros(len(edge_list))
+    last_ret = returns_df.iloc[-1]  # Series indexed by ticker
+    f = np.zeros(len(edge_list), dtype=float)
     for idx, (i, j, _) in enumerate(edge_list):
         f[idx] = last_ret.iloc[i] - last_ret.iloc[j]
     return f
@@ -70,46 +71,51 @@ def compute_edge_flow(returns_df, edge_list):
 def hodge_decomposition(B, f, eps=1e-8, max_iter=100):
     """
     Decompose edge flow f into gradient, curl, and harmonic components.
+    Uses the graph Helmholtzian (1-Laplacian) method.
+    
+    Parameters:
+        B : sparse matrix (nodes x edges)
+        f : 1D array (edges,)
+        eps : regularization for solving linear systems
+        max_iter : max iterations for LSQR
+    
     Returns:
-        grad: gradient component (B * x)
-        curl: curl component (f - grad - harmonic)
-        harmonic: harmonic component
-        potential: node potential x
+        grad : gradient component (edges,)
+        curl : curl component (edges,)
+        harmonic : harmonic component (edges,)
+        potential : node potentials (nodes,)
     """
-    # Solve for potential x: minimize ||B x - f||^2
-    # Normal equations: B^T B x = B^T f
+    # Ensure f is 1D
+    f = f.ravel()
+    n_edges = B.shape[1]
+    assert len(f) == n_edges, f"f length {len(f)} != number of edges {n_edges}"
+    
+    # ---- Gradient component: solve B * x = f (least squares) ----
+    # Solve for node potentials x such that Bx approximates f
+    # Use LSQR on the normal equations: B^T B x = B^T f
     BtB = B.T @ B
     Btf = B.T @ f
-    # Regularise
+    # Regularize
     BtB_reg = BtB + eps * sp.eye(BtB.shape[0], format='csr')
-    # Use LSQR (or sparse solver)
     x = lsqr(BtB_reg, Btf, atol=1e-6, btol=1e-6, iter_lim=max_iter)[0]
-    grad = B @ x
-    # Harmonic = residual after removing gradient from the nullspace of B^T and B?
-    # Standard approach: harmonic = f - grad - curl, where curl is projection onto cycle space.
-    # Simplify: curl = (I - B (B^T B)^+ B^T) f, harmonic = f - grad - curl.
-    # Instead we compute harmonic as projection onto kernel of Laplacian L1 = B B^T + B^T B? 
-    # For graph Helmholtzian: L1 = B B^T (0-form Laplacian) + B^T B (1-form Laplacian).
-    # We'll compute curl by solving for edge curl potential? Use pseudoinverse.
-    # A robust method: 
-    #   grad = B x
-    #   harmonic = f - B x - curl, with curl = B^T y? Actually curl on edges corresponds to 2-cochains.
-    # Simpler: Use networkx to compute cycle basis, project f onto cycle space.
-    # Let's implement a practical approach: solve for harmonic as the part orthogonal to both gradient and curl.
-    # We'll compute the projection onto the kernel of L1.
-    L1 = B @ B.T + B.T @ B   # 1-Laplacian
-    # Regularise and solve L1 * h = L1 * f? Actually harmonic satisfies L1 h = 0 and (f - h) is in range(L1).
-    # So h = f - L1^+ L1 f.
-    # Use LSQR to solve L1 * u = L1 * f, then h = f - u.
+    grad = (B @ x).ravel()
+    
+    # ---- Harmonic component: projection onto kernel of L1 = B B^T + B^T B ----
+    # Solve L1 * h = L1 * f, then harmonic = f - h
+    L1 = B @ B.T + B.T @ B   # 1-Laplacian (edges x edges)
     L1 = L1 + eps * sp.eye(L1.shape[0], format='csr')
     rhs = L1 @ f
-    u = lsqr(L1, rhs, atol=1e-6, btol=1e-6, iter_lim=max_iter)[0]
-    harmonic = f - u
-    # Then curl = f - grad - harmonic
+    h = lsqr(L1, rhs, atol=1e-6, btol=1e-6, iter_lim=max_iter)[0]
+    harmonic = (f - h).ravel()
+    
+    # Curl component = f - grad - harmonic
     curl = f - grad - harmonic
+    
     return grad, curl, harmonic, x
 
 def get_node_scores(harmonic_flow, B):
-    """Compute divergence of harmonic flow at nodes: B^T * harmonic."""
-    div = B.T @ harmonic_flow
-    return div
+    """
+    Compute divergence of harmonic flow at each node: B^T * harmonic_flow.
+    Returns 1D array of length n_nodes.
+    """
+    return (B.T @ harmonic_flow).ravel()
