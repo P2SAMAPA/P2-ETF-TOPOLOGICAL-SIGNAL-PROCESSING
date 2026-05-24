@@ -14,29 +14,13 @@ from hodge_utils import (
     get_node_scores
 )
 
-
 def run_for_window(returns, window_days, top_frac):
     """
     Run Hodge decomposition on a rolling window of returns.
-
-    Parameters:
-    -----------
-    returns : pd.DataFrame
-        Wide DataFrame of log returns (columns = tickers, index = date).
-    window_days : int
-        Number of days to include in the window (takes the last `window_days` rows).
-    top_frac : float
-        Fraction of strongest correlation edges to keep when building the graph.
-
-    Returns:
-    --------
-    dict or None
-        Dictionary with window results, or None if not enough data or no edges.
     """
     if len(returns) < window_days:
         return None
 
-    # Take the last `window_days` rows
     ret_window = returns.iloc[-window_days:]
 
     # Build graph and edge list
@@ -44,10 +28,10 @@ def run_for_window(returns, window_days, top_frac):
     if len(edge_list) == 0:
         return None
 
-    # Incidence matrix
-    B = incidence_matrix(G, nodes, edge_list)
+    # Incidence matrix (nodes x edges)
+    B = incidence_matrix(nodes, edge_list)   # <-- removed G argument
 
-    # Edge flow vector (return differences on last day)
+    # Edge flow vector
     f = compute_edge_flow(ret_window, edge_list)
 
     # Hodge decomposition
@@ -73,21 +57,16 @@ def run_for_window(returns, window_days, top_frac):
         "n_edges": len(edge_list)
     }
 
-
 def main():
-    """Main training loop: load data, iterate over universes and windows, save results."""
     print("Loading master data via data_manager...")
-    # Preload data into cache (optional)
     dm.load_master_data()
 
-    # Prepare results container
     results = {
         "run_date": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
         "windows": config.WINDOWS,
         "universes": {}
     }
 
-    # Iterate over each universe defined in config
     for uni_name in config.UNIVERSES.keys():
         print(f"Processing {uni_name}...")
         returns = dm.get_universe_returns(uni_name)
@@ -106,7 +85,6 @@ def main():
 
         results["universes"][uni_name] = uni_results
 
-    # Save results locally
     os.makedirs("output", exist_ok=True)
     timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
     out_file = f"output/topological_{timestamp}.json"
@@ -114,7 +92,6 @@ def main():
         json.dump(results, f, indent=2)
     print(f"Results saved locally: {out_file}")
 
-    # Upload to Hugging Face dataset repo
     api = HfApi(token=config.HF_TOKEN)
     try:
         api.upload_file(
@@ -126,7 +103,6 @@ def main():
         print(f"Uploaded to {config.OUTPUT_REPO}")
     except Exception as e:
         print(f"Upload failed: {e}")
-
 
 if __name__ == "__main__":
     main()
