@@ -42,7 +42,23 @@ def compute_edge_flow(returns_df, edge_list):
         f[idx] = last_ret[i] - last_ret[j]
     return f
 
-def cycle_basis_vectors(G, edge_list, nodes):
+def hodge_decomposition(B, f, G, edge_list, nodes, eps=1e-8):
+    """
+    Hodge decomposition using pseudoinverse.
+    grad = B * (B^+ * f)  where B^+ = (B^T B)^{-1} B^T
+    harmonic = f - grad - curl, but we compute harmonic directly as projection onto kernel of L1.
+    Instead, we compute harmonic = f - B * (B^+ f) - curl, with curl = projection onto cycle space.
+    To avoid cycle basis, we can compute harmonic = (I - B B^+ - C C^+) f, where C is cycle basis.
+    But easier: harmonic = f - B * (B^+ f) - C * (C^+ (f - B B^+ f))
+    """
+    # Pseudoinverse of B
+    BtB = B.T @ B + eps * np.eye(B.shape[1])
+    BtB_inv = np.linalg.inv(BtB)
+    B_pinv = BtB_inv @ B.T  # (nodes x edges)
+    grad = B @ (B_pinv @ f)   # gradient component
+    
+    residual = f - grad
+    # Cycle basis
     edge_to_idx = {}
     for idx, (i, j, _) in enumerate(edge_list):
         edge_to_idx[(i, j)] = idx
@@ -59,30 +75,15 @@ def cycle_basis_vectors(G, edge_list, nodes):
             if idx is not None:
                 flow[idx] = 1.0
         basis.append(flow)
-    if not basis:
-        return np.zeros((len(edge_list), 0))
-    basis_mat = np.array(basis).T
-    Q, _ = np.linalg.qr(basis_mat, mode='reduced')
-    return Q
-
-def hodge_decomposition(B, f, G, edge_list, nodes, eps=1e-8):
-    n_edges = B.shape[0]
-    # Gradient component
-    BtB = B.T @ B + eps * np.eye(B.shape[1])
-    Btf = B.T @ f
-    potential = np.linalg.lstsq(BtB, Btf, rcond=None)[0]
-    grad = B @ potential
-    # Residual after removing gradient
-    residual = f - grad
-    # Curl component (project onto cycle space)
-    cycle_basis = cycle_basis_vectors(G, edge_list, nodes)
-    if cycle_basis.shape[1] > 0:
-        curl = cycle_basis @ (cycle_basis.T @ residual)
+    if basis:
+        basis_mat = np.array(basis).T
+        # Orthonormalize
+        Q, _ = np.linalg.qr(basis_mat, mode='reduced')
+        curl = Q @ (Q.T @ residual)
     else:
         curl = np.zeros_like(f)
-    # Harmonic component = residual - curl
     harmonic = residual - curl
-    return grad, curl, harmonic, potential
+    return grad, curl, harmonic, B_pinv @ f  # potential = B_pinv @ f
 
 def get_node_scores(harmonic_flow, B):
     return B.T @ harmonic_flow
