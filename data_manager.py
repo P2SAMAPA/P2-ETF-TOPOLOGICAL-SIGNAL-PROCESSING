@@ -1,43 +1,45 @@
 import pandas as pd
-from huggingface_hub import HfFileSystem
+import numpy as np
+from huggingface_hub import hf_hub_download
 import config
 
-_fs = HfFileSystem(token=config.HF_TOKEN)
-_master_cache = None
-
 def load_master_data():
-    """Load master data parquet from HF repo once."""
-    global _master_cache
-    if _master_cache is not None:
-        return _master_cache
-    path = f"datasets/{config.DATA_REPO}/master_data.parquet"
-    with _fs.open(path, "rb") as f:
-        df = pd.read_parquet(f)
-    df['date'] = pd.to_datetime(df['date'])
-    _master_cache = df
+    """Load master data parquet from HF, set date index."""
+    path = hf_hub_download(
+        repo_id=config.DATA_REPO,
+        filename="master_data.parquet",
+        repo_type="dataset",
+        token=config.HF_TOKEN
+    )
+    df = pd.read_parquet(path)
+    if df.index.name != 'date':
+        df.index.name = 'date'
+    if 'date' in df.columns:
+        df['date'] = pd.to_datetime(df['date'])
+        df.set_index('date', inplace=True)
     return df
 
-def get_ticker_returns(tickers, start_date=None, end_date=None):
+def prepare_returns_matrix(df, universe_tickers):
     """
-    Return a DataFrame of daily log returns for given tickers.
-    Columns = tickers, index = date.
+    Given a master DataFrame (index=date, columns include ticker prices),
+    return a wide DataFrame of log returns for the specified tickers.
     """
-    df = load_master_data()
-    mask = df['ticker'].isin(tickers)
-    if start_date:
-        mask &= df['date'] >= pd.to_datetime(start_date)
-    if end_date:
-        mask &= df['date'] <= pd.to_datetime(end_date)
-    sub = df[mask].copy()
-    # pivot to wide format
-    pivot = sub.pivot(index='date', columns='ticker', values='close')
-    # log returns
-    rets = np.log(pivot / pivot.shift(1)).dropna()
-    # align to common dates (all tickers present)
-    rets = rets.dropna()
-    return rets
+    returns = pd.DataFrame(index=df.index)
+    for ticker in universe_tickers:
+        if ticker in df.columns:
+            price = df[ticker]
+            if not price.isna().all():
+                returns[ticker] = np.log(price / price.shift(1))
+    returns = returns.dropna(how='all')
+    return returns
 
 def get_universe_returns(universe_name, start_date=None, end_date=None):
-    """Convenience wrapper for a full universe."""
+    """Convenience: load master data and return returns matrix for a universe."""
+    df = load_master_data()
     tickers = config.UNIVERSES.get(universe_name, [])
-    return get_ticker_returns(tickers, start_date, end_date)
+    returns = prepare_returns_matrix(df, tickers)
+    if start_date:
+        returns = returns[returns.index >= pd.to_datetime(start_date)]
+    if end_date:
+        returns = returns[returns.index <= pd.to_datetime(end_date)]
+    return returns
