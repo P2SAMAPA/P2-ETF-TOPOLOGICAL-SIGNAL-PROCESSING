@@ -23,8 +23,8 @@ def run_for_window(returns, window_days, top_frac):
         return None
     B = incidence_matrix(nodes, edge_list)
     f = compute_edge_flow(ret_window, edge_list)
-    # Removed max_iter argument:
-    grad, curl, harmonic, potential = hodge_decomposition(B, f, eps=config.EPS)
+    # Pass G, edge_list, nodes to hodge_decomposition
+    grad, curl, harmonic, potential = hodge_decomposition(B, f, G, edge_list, nodes, eps=config.EPS)
     node_scores = get_node_scores(harmonic, B)
     score_dict = {ticker: float(node_scores[i]) for i, ticker in enumerate(nodes)}
     sorted_scores = sorted(score_dict.items(), key=lambda x: abs(x[1]), reverse=True)
