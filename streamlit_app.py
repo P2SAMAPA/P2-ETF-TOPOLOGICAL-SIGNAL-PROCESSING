@@ -12,12 +12,6 @@ st.markdown('<p style="text-align: center;">Hodge decomposition of ETF return fl
 st.sidebar.markdown("## 🧩 Topological Signals")
 st.sidebar.markdown(f"**Run Date:** `{st.session_state.get('run_date', 'Not loaded')}`")
 st.sidebar.markdown(f"**Next Trading Day:** `{next_trading_day()}`")
-
-# Safe fallback for optional config values
-threshold_mult = getattr(config, 'THRESHOLD_MULT', 'N/A')
-vol_window = getattr(config, 'VOL_WINDOW', 'N/A')
-st.sidebar.markdown(f"**Threshold mult:** {threshold_mult} | **Vol window:** {vol_window}")
-
 st.sidebar.markdown(f"**Windows evaluated:** {', '.join(map(str, config.WINDOWS))} days")
 st.sidebar.markdown("**Method:** Graph Helmholtzian (Lim 2020)")
 
