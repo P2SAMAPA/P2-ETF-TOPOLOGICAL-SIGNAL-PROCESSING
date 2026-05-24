@@ -36,6 +36,12 @@ st.markdown('<h1 style="text-align: center;">🌀 Topological Signal Processing<
 st.markdown('<p style="text-align: center;">Hodge decomposition of ETF return flows | Harmonic = arbitrage‑free persistent signal</p>', unsafe_allow_html=True)
 
 st.sidebar.markdown("## 🧩 Topological Signals")
+
+# ---- Refresh button ----
+if st.sidebar.button("🔄 Refresh Data", use_container_width=True, type="primary"):
+    st.cache_data.clear()
+    st.rerun()
+
 st.sidebar.markdown(f"**Run Date:** `{st.session_state.get('run_date', 'Not loaded')}`")
 st.sidebar.markdown(f"**Next Trading Day:** `{next_trading_day()}`")
 st.sidebar.markdown(f"**Windows evaluated:** {', '.join(map(str, config.WINDOWS))} days")
@@ -69,6 +75,7 @@ def load_json(path):
     except Exception as e:
         return {"error": str(e)}
 
+# ---- Load data (cached) ----
 files = list_repo_files()
 latest = find_latest_json(files)
 if not latest:
