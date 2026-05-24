@@ -36,29 +36,25 @@ def incidence_matrix(node_list, edge_list):
     return B
 
 def compute_edge_flow(returns_df, edge_list):
-    last_ret = returns_df.iloc[-1].values
+    """
+    Edge flow = cumulative return difference over the entire window.
+    This ensures non‑zero, economically meaningful signals.
+    """
+    cum_ret = returns_df.sum(axis=0).values  # total log return per ETF over window
     f = np.zeros(len(edge_list), dtype=float)
     for idx, (i, j, _) in enumerate(edge_list):
-        f[idx] = last_ret[i] - last_ret[j]
+        f[idx] = cum_ret[i] - cum_ret[j]
     return f
 
 def hodge_decomposition(B, f, G, edge_list, nodes, eps=1e-8):
-    """
-    Hodge decomposition using pseudoinverse.
-    grad = B * (B^+ * f)  where B^+ = (B^T B)^{-1} B^T
-    harmonic = f - grad - curl, but we compute harmonic directly as projection onto kernel of L1.
-    Instead, we compute harmonic = f - B * (B^+ f) - curl, with curl = projection onto cycle space.
-    To avoid cycle basis, we can compute harmonic = (I - B B^+ - C C^+) f, where C is cycle basis.
-    But easier: harmonic = f - B * (B^+ f) - C * (C^+ (f - B B^+ f))
-    """
     # Pseudoinverse of B
     BtB = B.T @ B + eps * np.eye(B.shape[1])
     BtB_inv = np.linalg.inv(BtB)
-    B_pinv = BtB_inv @ B.T  # (nodes x edges)
-    grad = B @ (B_pinv @ f)   # gradient component
-    
+    B_pinv = BtB_inv @ B.T
+    grad = B @ (B_pinv @ f)
     residual = f - grad
-    # Cycle basis
+
+    # Cycle basis for curl component
     edge_to_idx = {}
     for idx, (i, j, _) in enumerate(edge_list):
         edge_to_idx[(i, j)] = idx
@@ -77,13 +73,14 @@ def hodge_decomposition(B, f, G, edge_list, nodes, eps=1e-8):
         basis.append(flow)
     if basis:
         basis_mat = np.array(basis).T
-        # Orthonormalize
         Q, _ = np.linalg.qr(basis_mat, mode='reduced')
         curl = Q @ (Q.T @ residual)
     else:
         curl = np.zeros_like(f)
+
     harmonic = residual - curl
-    return grad, curl, harmonic, B_pinv @ f  # potential = B_pinv @ f
+    potential = B_pinv @ f
+    return grad, curl, harmonic, potential
 
 def get_node_scores(harmonic_flow, B):
     return B.T @ harmonic_flow
