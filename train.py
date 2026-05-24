@@ -15,40 +15,20 @@ from hodge_utils import (
 )
 
 def run_for_window(returns, window_days, top_frac):
-    """
-    Run Hodge decomposition on a rolling window of returns.
-    """
     if len(returns) < window_days:
         return None
-
     ret_window = returns.iloc[-window_days:]
-
-    # Build graph and edge list
     G, edge_list, nodes = build_graph_from_returns(ret_window, top_edge_fraction=top_frac)
     if len(edge_list) == 0:
         return None
-
-    # Incidence matrix (nodes x edges)
-    B = incidence_matrix(nodes, edge_list)   # <-- removed G argument
-
-    # Edge flow vector
+    B = incidence_matrix(nodes, edge_list)
     f = compute_edge_flow(ret_window, edge_list)
-
-    # Hodge decomposition
-    grad, curl, harmonic, potential = hodge_decomposition(
-        B, f, eps=config.EPS, max_iter=config.MAX_ITER
-    )
-
-    # Node scores = divergence of harmonic flow
+    # Removed max_iter argument:
+    grad, curl, harmonic, potential = hodge_decomposition(B, f, eps=config.EPS)
     node_scores = get_node_scores(harmonic, B)
-
-    # Build per‑ticker score dictionary
     score_dict = {ticker: float(node_scores[i]) for i, ticker in enumerate(nodes)}
-
-    # Top 3 ETFs by absolute harmonic score
     sorted_scores = sorted(score_dict.items(), key=lambda x: abs(x[1]), reverse=True)
     top_etfs = [{"ticker": t, "harmonic_score": s} for t, s in sorted_scores[:3]]
-
     return {
         "window": window_days,
         "top_etfs": top_etfs,
@@ -60,20 +40,17 @@ def run_for_window(returns, window_days, top_frac):
 def main():
     print("Loading master data via data_manager...")
     dm.load_master_data()
-
     results = {
         "run_date": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
         "windows": config.WINDOWS,
         "universes": {}
     }
-
     for uni_name in config.UNIVERSES.keys():
         print(f"Processing {uni_name}...")
         returns = dm.get_universe_returns(uni_name)
         if returns.empty:
             print(f"  No data for {uni_name} -> skipping")
             continue
-
         uni_results = []
         for w in config.WINDOWS:
             print(f"  Window {w} days")
@@ -82,16 +59,13 @@ def main():
                 uni_results.append(out)
             else:
                 print(f"    Not enough data or no edges for window {w}")
-
         results["universes"][uni_name] = uni_results
-
     os.makedirs("output", exist_ok=True)
     timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
     out_file = f"output/topological_{timestamp}.json"
     with open(out_file, "w") as f:
         json.dump(results, f, indent=2)
     print(f"Results saved locally: {out_file}")
-
     api = HfApi(token=config.HF_TOKEN)
     try:
         api.upload_file(
