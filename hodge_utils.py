@@ -36,13 +36,16 @@ def build_graph_from_returns(returns_df, top_edge_fraction=0.2):
     return G, edge_list, nodes
 
 def incidence_matrix(node_list, edge_list):
-    """Dense incidence matrix B (nodes x edges)."""
+    """
+    Build oriented incidence matrix B of shape (edges, nodes).
+    For edge e from i to j: B[e, i] = -1, B[e, j] = +1.
+    """
     n_nodes = len(node_list)
     n_edges = len(edge_list)
-    B = np.zeros((n_nodes, n_edges), dtype=float)
+    B = np.zeros((n_edges, n_nodes), dtype=float)
     for e_idx, (i, j, _) in enumerate(edge_list):
-        B[i, e_idx] = -1.0
-        B[j, e_idx] = 1.0
+        B[e_idx, i] = -1.0
+        B[e_idx, j] = 1.0
     return B
 
 def compute_edge_flow(returns_df, edge_list):
@@ -53,26 +56,26 @@ def compute_edge_flow(returns_df, edge_list):
         f[idx] = last_ret[i] - last_ret[j]
     return f
 
-def hodge_decomposition(B, f, eps=1e-8, max_iter=100):
+def hodge_decomposition(B, f, eps=1e-8):
     """
     Hodge decomposition using dense linear algebra.
-    B : (nodes, edges)
+    B : (edges, nodes)
     f : (edges,)
     Returns (grad, curl, harmonic, potential)
     """
-    n_edges = B.shape[1]
+    n_edges = B.shape[0]
     f = f.ravel()
     assert len(f) == n_edges, f"Length mismatch: f {len(f)} vs edges {n_edges}"
 
-    # ---- Gradient component: solve Bx ≈ f ----
-    BtB = B.T @ B + eps * np.eye(n_edges)
-    Btf = B.T @ f
+    # ---- Gradient component: solve B^T B x = B^T f ----
+    BtB = B.T @ B + eps * np.eye(B.shape[1])
+    Btf = B.T @ f                     # (nodes,)
     potential = np.linalg.lstsq(BtB, Btf, rcond=None)[0]
-    grad = B @ potential
+    grad = B @ potential              # (edges,)
 
-    # ---- Harmonic component: projection onto kernel of L1 = B B^T + B^T B ----
-    L1 = B @ B.T + B.T @ B
-    L1_reg = L1 + eps * np.eye(L1.shape[0])
+    # ---- Harmonic component: solve L1 h = L1 f, L1 = B B^T + B^T B ----
+    L1 = B @ B.T + B.T @ B            # (edges, edges)
+    L1_reg = L1 + eps * np.eye(n_edges)
     rhs = L1_reg @ f
     h = np.linalg.lstsq(L1_reg, rhs, rcond=None)[0]
     harmonic = f - h
@@ -83,5 +86,5 @@ def hodge_decomposition(B, f, eps=1e-8, max_iter=100):
     return grad, curl, harmonic, potential
 
 def get_node_scores(harmonic_flow, B):
-    """Divergence of harmonic flow at nodes: B^T * harmonic_flow."""
+    """Divergence of harmonic flow at nodes = B^T @ harmonic_flow (size nodes)."""
     return B.T @ harmonic_flow
